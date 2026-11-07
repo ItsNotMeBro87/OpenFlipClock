@@ -22,3 +22,10 @@ Pomodoro + Flowmodoro modes, left-edge swipe drawer, square flip tiles with a re
 (background / flipboard / number), tap-to-open settings (no accidental scroll changes), reset to default,
 Wallhaven search fix. Appearance is now: Dark, Light, Custom color, Wallhaven, Local image.
 Planned for v0.2.1: alarms (up to 10, no vibration by default, custom sounds) and more wallpaper sources.
+
+## v0.2.1 Beta changes
+Alarms (up to 10, snooze, no vibration by default, system/local sounds, bell on the clock), phase-end notifications
+for Pomodoro/Flowmodoro while the app is closed, long break after 4 rounds + today's focus total, size sliders,
+display corner radius, brightness + night dimming schedule, optional screensaver, settings that show only options
+for the chosen appearance, Credit screen, scrollable color picker, larger timer layout.
+Planned for v0.2.2: Pexels and Bing daily wallpaper sources.

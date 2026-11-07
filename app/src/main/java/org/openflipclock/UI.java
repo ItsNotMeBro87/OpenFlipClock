@@ -8,6 +8,8 @@ import android.widget.*;
 
 /** Small helpers so the settings screens stay plain framework widgets (light on RAM/APK size). */
 final class UI {
+    static final String VERSION = "v0.2.1 Beta";
+
     interface IntCb { void run(int v); }
 
     static int dp(Context c, int v) { return (int) (v * c.getResources().getDisplayMetrics().density + .5f); }
@@ -20,12 +22,14 @@ final class UI {
         return tv;
     }
 
-    static CheckBox check(final Context c, String t, final String k, boolean d) {
+    static CheckBox check(Context c, String t, String k, boolean d) { return check(c, t, k, d, null); }
+
+    static CheckBox check(final Context c, String t, final String k, boolean d, final Runnable after) {
         CheckBox cb = new CheckBox(c);
         cb.setText(t);
         cb.setChecked(Prefs.b(c, k, d));
         cb.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
-            public void onCheckedChanged(CompoundButton b, boolean on) { Prefs.put(c, k, on); }
+            public void onCheckedChanged(CompoundButton b, boolean on) { Prefs.put(c, k, on); if (after != null) after.run(); }
         });
         return cb;
     }
@@ -154,7 +158,9 @@ final class UI {
                 int p = dp(c, 16);
                 l.setPadding(p, p, p, p);
                 l.addView(cp, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-                new AlertDialog.Builder(c).setTitle(title).setView(l)
+                ScrollView sv = new ScrollView(c);   // scrollable, so it still fits in landscape
+                sv.addView(l);
+                new AlertDialog.Builder(c).setTitle(title).setView(sv)
                     .setPositiveButton("Select", new android.content.DialogInterface.OnClickListener() {
                         public void onClick(android.content.DialogInterface d, int w) {
                             Prefs.put(c, key, cp.getColor());
@@ -168,6 +174,21 @@ final class UI {
                         }
                     })
                     .setNegativeButton("Cancel", null).show();
+            }
+        });
+        return r;
+    }
+
+    static String hm(int mins) { return String.format("%02d:%02d", mins / 60, mins % 60); }
+
+    static View timeRow(final Context c, final String title, final String key, final int def) {
+        final LinearLayout r = row(c, title, hm(Prefs.i(c, key, def)));
+        r.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                int cur = Prefs.i(c, key, def);
+                new android.app.TimePickerDialog(c, new android.app.TimePickerDialog.OnTimeSetListener() {
+                    public void onTimeSet(TimePicker tp, int h, int m) { Prefs.put(c, key, h * 60 + m); setValue(r, hm(h * 60 + m)); }
+                }, cur / 60, cur % 60, true).show();
             }
         });
         return r;

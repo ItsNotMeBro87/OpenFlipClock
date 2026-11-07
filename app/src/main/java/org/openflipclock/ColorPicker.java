@@ -21,7 +21,7 @@ final class ColorPicker extends LinearLayout {
             hue = h[0]; sat = h[1]; val = h[2];
         }
         wheel = new Wheel(c);
-        addView(wheel, new LayoutParams(LayoutParams.MATCH_PARENT, UI.dp(c, 260)));
+        addView(wheel, new LayoutParams(LayoutParams.MATCH_PARENT, Math.min(UI.dp(c, 260), (int) (c.getResources().getDisplayMetrics().heightPixels * 0.5f))));
         SeekBar sb = new SeekBar(c);
         sb.setMax(100);
         sb.setProgress((int) (val * 100));

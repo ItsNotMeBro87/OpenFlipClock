@@ -10,6 +10,21 @@ final class Timers {
     static int focusMin(Context c) { int p = Prefs.i(c, "tm_preset", 0); return p < 3 ? PRE[p][0] : Prefs.i(c, "tm_focus", 25); }
     static int breakMin(Context c) { int p = Prefs.i(c, "tm_preset", 0); return p < 3 ? PRE[p][1] : Prefs.i(c, "tm_break", 5); }
 
+    // ---------------- today's focus total ----------------
+    private static int dayNum() {
+        long n = System.currentTimeMillis();
+        return (int) ((n + java.util.TimeZone.getDefault().getOffset(n)) / 86400000L);
+    }
+    static long todayMs(Context c) { return Prefs.i(c, "tm_day", -1) == dayNum() ? Prefs.l(c, "tm_today", 0) : 0; }
+    static void addToday(Context c, long ms) {
+        if (ms <= 0) return;
+        long t = todayMs(c) + ms;
+        Prefs.put(c, "tm_day", dayNum());
+        Prefs.put(c, "tm_today", t);
+    }
+
+    static boolean pLong(Context c) { return Prefs.b(c, "tm_plong", false); }
+
     // ---------------- Pomodoro: state 0 idle, 1 focus, 2 break ----------------
     static int pState(Context c) { return Prefs.i(c, "tm_pstate", 0); }
     static boolean pPaused(Context c) { return Prefs.b(c, "tm_ppaused", false); }
@@ -37,7 +52,9 @@ final class Timers {
     static void pSkip(Context c, long now) {
         int s = pState(c);
         if (s == 1) {
+            addToday(c, focusMin(c) * 60000L - Math.max(0, pRemaining(c, now)));
             Prefs.put(c, "tm_pstate", 2);
+            Prefs.put(c, "tm_plong", false);
             Prefs.put(c, "tm_pend", now + breakMin(c) * 60000L);
             Prefs.put(c, "tm_ppaused", false);
         } else if (s == 2) {
@@ -46,7 +63,8 @@ final class Timers {
         }
     }
 
-    static void pStop(Context c) {
+    static void pStop(Context c, long now) {
+        if (pState(c) == 1) addToday(c, focusMin(c) * 60000L - Math.max(0, pRemaining(c, now)));
         Prefs.put(c, "tm_pstate", 0);
         Prefs.put(c, "tm_ppaused", false);
         Prefs.put(c, "tm_round", 0);
@@ -59,8 +77,12 @@ final class Timers {
         long end = Prefs.l(c, "tm_pend", 0);
         if (now < end) return false;
         if (s == 1) {
-            Prefs.put(c, "tm_round", Prefs.i(c, "tm_round", 0) + 1);
-            long be = end + breakMin(c) * 60000L;
+            addToday(c, focusMin(c) * 60000L);
+            int r = Prefs.i(c, "tm_round", 0) + 1;
+            Prefs.put(c, "tm_round", r);
+            boolean lng = Prefs.b(c, "tm_longon", true) && r % 4 == 0;
+            Prefs.put(c, "tm_plong", lng);
+            long be = end + (lng ? Prefs.i(c, "tm_longmin", 15) : breakMin(c)) * 60000L;
             if (now < be) { Prefs.put(c, "tm_pstate", 2); Prefs.put(c, "tm_pend", be); }
             else Prefs.put(c, "tm_pstate", 0);
         } else {
@@ -79,6 +101,7 @@ final class Timers {
     static void fStartBreak(Context c, long now) {
         if (fState(c) == 1) {
             long flow = fElapsed(c, now);
+            addToday(c, flow);
             Prefs.put(c, "tm_ftotal", Prefs.l(c, "tm_ftotal", 0) + flow);
             long bm = Math.max(60000L, flow / DEN[Math.min(2, Prefs.i(c, "tm_ratio", 1))]);
             Prefs.put(c, "tm_fend", now + bm);
@@ -91,7 +114,9 @@ final class Timers {
 
     /** Ends the session and returns total flow time in ms. */
     static long fEnd(Context c, long now) {
-        long total = Prefs.l(c, "tm_ftotal", 0) + (fState(c) == 1 ? fElapsed(c, now) : 0);
+        long running = fState(c) == 1 ? fElapsed(c, now) : 0;
+        addToday(c, running);
+        long total = Prefs.l(c, "tm_ftotal", 0) + running;
         Prefs.put(c, "tm_fstate", 0);
         Prefs.put(c, "tm_ftotal", 0L);
         return total;

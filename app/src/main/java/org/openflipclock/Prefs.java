@@ -23,7 +23,7 @@ final class Prefs {
         else if (v instanceof Long) e.putLong(k, (Long) v);
         else e.putString(k, (String) v);
         // runtime state (timers, mode, last wallpaper update) must not trigger a background rebuild
-        if (!(k.equals("wh_last") || k.equals("mode") || k.startsWith("tm_"))) e.putLong("rev", System.nanoTime());
+        if (!(k.equals("wh_last") || k.equals("mode") || k.equals("alarms") || k.startsWith("tm_"))) e.putLong("rev", System.nanoTime());
         e.apply();
     }
 }

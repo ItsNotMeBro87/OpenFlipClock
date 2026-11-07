@@ -11,10 +11,10 @@ import android.os.Looper;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
+import java.util.Calendar;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
-import android.widget.Toast;
 
 public class MainActivity extends Activity implements FlipClockView.Host {
     private FlipClockView v;
@@ -22,7 +22,8 @@ public class MainActivity extends Activity implements FlipClockView.Host {
     private View scrim;
     private boolean open;
     private int dw;
-    private final TextView[] items = new TextView[5];
+    static boolean visible;
+    private final TextView[] items = new TextView[6];
     private final Handler h = new Handler(Looper.getMainLooper());
 
     @Override protected void onCreate(Bundle b) {
@@ -51,14 +52,20 @@ public class MainActivity extends Activity implements FlipClockView.Host {
         t.setText("OpenFlipClock");
         t.setTextSize(20);
         t.setTextColor(0xFFFFFFFF);
-        t.setPadding(UI.dp(this, 24), 0, 0, UI.dp(this, 16));
+        t.setPadding(UI.dp(this, 24), 0, 0, 0);
         drawer.addView(t);
-        String[] names = {"FlipClock", "Pomodoro", "Flowmodoro", "Alarm  (v0.2.1)", "Settings"};
-        for (int i = 0; i < 5; i++) {
+        TextView ver = new TextView(this);
+        ver.setText(UI.VERSION);
+        ver.setTextSize(13);
+        ver.setTextColor(0xFF9E9E9E);
+        ver.setPadding(UI.dp(this, 24), UI.dp(this, 2), 0, UI.dp(this, 16));
+        drawer.addView(ver);
+        String[] names = {"FlipClock", "Pomodoro", "Flowmodoro", "Alarm", "Settings", "Credit"};
+        for (int i = 0; i < 6; i++) {
             TextView it = new TextView(this);
             it.setText(names[i]);
             it.setTextSize(17);
-            it.setTextColor(i == 3 ? 0xFF777777 : 0xFFFFFFFF);
+            it.setTextColor(0xFFFFFFFF);
             it.setPadding(UI.dp(this, 24), UI.dp(this, 16), UI.dp(this, 24), UI.dp(this, 16));
             final int idx = i;
             it.setOnClickListener(new View.OnClickListener() { public void onClick(View x) { select(idx); } });
@@ -72,15 +79,16 @@ public class MainActivity extends Activity implements FlipClockView.Host {
     private void select(int i) {
         closeDrawer();
         if (i <= 2) v.setMode(i);
-        else if (i == 3) Toast.makeText(this, "Alarms arrive in v0.2.1 Beta", Toast.LENGTH_SHORT).show();
-        else startActivity(new Intent(this, SettingsActivity.class));
+        else if (i == 3) startActivity(new Intent(this, AlarmActivity.class));
+        else if (i == 4) startActivity(new Intent(this, SettingsActivity.class));
+        else startActivity(new Intent(this, CreditActivity.class));
     }
 
     @Override public void openDrawer() {
         if (open) return;
         open = true;
         int mode = Prefs.i(this, "mode", 0);
-        for (int k = 0; k < 5; k++) items[k].setBackgroundColor(k == mode ? 0x33FFFFFF : 0);
+        for (int k = 0; k < 6; k++) items[k].setBackgroundColor(k == mode ? 0x33FFFFFF : 0);
         scrim.setAlpha(0f);
         scrim.setVisibility(View.VISIBLE);
         scrim.animate().alpha(1f).setDuration(160);
@@ -104,14 +112,17 @@ public class MainActivity extends Activity implements FlipClockView.Host {
 
     @Override protected void onResume() {
         super.onResume();
+        visible = true;
         applyWindow();
         if (v.rev != Prefs.rev(this)) v.reload();
         v.start();
         scheduleAuto();
+        brightRun.run();
     }
 
     @Override protected void onPause() {
         super.onPause();
+        visible = false;
         v.stop();
         h.removeCallbacksAndMessages(null);
     }
@@ -141,6 +152,25 @@ public class MainActivity extends Activity implements FlipClockView.Host {
             d.setSystemUiVisibility(View.SYSTEM_UI_FLAG_VISIBLE);
         }
     }
+
+    // ---- Brightness + optional night dimming schedule (re-checked once a minute while on screen) ----
+    private final Runnable brightRun = new Runnable() {
+        public void run() {
+            int lvl = Prefs.i(MainActivity.this, "bright", 100);
+            boolean dim = false;
+            if (Prefs.b(MainActivity.this, "dim_on", false)) {
+                Calendar cal = Calendar.getInstance();
+                int m = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE);
+                int a = Prefs.i(MainActivity.this, "dim_from", 1320), b = Prefs.i(MainActivity.this, "dim_to", 360);
+                dim = a <= b ? (m >= a && m < b) : (m >= a || m < b);
+            }
+            if (dim) lvl = Prefs.i(MainActivity.this, "dim_level", 10);
+            WindowManager.LayoutParams lp = getWindow().getAttributes();
+            lp.screenBrightness = (!dim && lvl >= 100) ? WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE : Math.max(0.01f, lvl / 100f);
+            getWindow().setAttributes(lp);
+            h.postDelayed(this, 60000);
+        }
+    };
 
     // ---- Wallhaven auto-update: only runs while this screen is visible. No service, no alarms. ----
     private final Runnable autoRun = new Runnable() {
