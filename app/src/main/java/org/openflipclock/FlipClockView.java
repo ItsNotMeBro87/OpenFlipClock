@@ -1,46 +1,64 @@
 package org.openflipclock;
 
+import android.app.AlertDialog;
 import android.content.*;
 import android.graphics.*;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.GradientDrawable;
+import android.media.AudioManager;
+import android.media.ToneGenerator;
 import android.os.*;
+import android.text.InputType;
 import android.text.format.DateFormat;
 import android.view.*;
+import android.widget.*;
 import java.io.File;
 import java.text.SimpleDateFormat;
 import java.util.*;
 
-/** The whole clock is this one View. It redraws only when something changes. */
+/** Clock, Pomodoro and Flowmodoro are all drawn by this one View. It redraws only when something changes. */
 public class FlipClockView extends View {
-    public interface Host { void openSettings(); }
+    public interface Host { void openDrawer(); }
 
     public Host host;
     public long rev = -1;
     private static final int FLIP_MS = 420;
+    private static final int B_PRESET = 1, B_START = 2, B_SKIP = 3, B_STOP = 4, B_FLOW = 5, B_FEND = 6;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final float dp;
-    private int appearance, pos, blurR, hfmt;
+    private int look, pos, blurR, hfmt, mode, ovBg, ovTile, ovDigit;
     private boolean showDate, showSec, showBat, shift;
     private float tileAlpha = 1f;
-    private SimpleDateFormat fmtDate, fmtDay;
-    private int tileColor = 0xFF212121, digitColor = 0xFFB0B0B0;
+    private SimpleDateFormat fmtDate, fmtDay, fmtSmall;
+    private int tileColor = 0xFF212121, digitColor = 0xFFB0B0B0, hudColor = 0xFFFFFFFF, drawDigit = 0xFFB0B0B0;
     private Bitmap src, bg, blurBmp;
 
-    private String hNow = "", mNow = "", hOld = "", mOld = "", ampm = "", sec = "", dateS = "", dayS = "";
+    private String t1Now = "", t2Now = "", t1Old = "", t2Old = "", u1 = "", u2 = "", ampm = "", sec = "",
+            dateS = "", dayS = "", smallTime = "", minKey = "", stateLabel = "";
+    private int stateColor = 0xFFFFFFFF, rounds;
+    private boolean overrun, overrunBeeped;
     private long flipStart = 0;
-    private boolean hFlip, mFlip;
+    private boolean f1, f2;
     private int batPct = -1;
     private boolean charging, batRegistered, menuVisible;
     private int shiftDx, shiftDy;
+    private float downX, downY;
+    private boolean edge, swiped;
 
     private final Paint digit = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint small = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint tileP = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint linePaint = new Paint();
+    private final Paint hudP = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint btnP = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint imgP = new Paint(Paint.FILTER_BITMAP_FLAG);
-    private final RectF hr = new RectF(), mr = new RectF(), full = new RectF(), menuRect = new RectF();
+    private final RectF hr = new RectF(), mr = new RectF(), full = new RectF(), menuRect = new RectF(), dstR = new RectF();
+    private final Rect srcR = new Rect();
+    private final RectF[] btn = {new RectF(), new RectF(), new RectF(), new RectF()};
+    private final int[] btnId = new int[4];
+    private int nBtn;
     private final Path clipPath = new Path();
-    private float corner, digitOff;
+    private float corner, digitOff, splitGap;
 
     private final Runnable tickR = new Runnable() { public void run() { tick(); } };
     private final Runnable hideMenu = new Runnable() { public void run() { menuVisible = false; invalidate(); } };
@@ -60,14 +78,16 @@ public class FlipClockView extends View {
         digit.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
         digit.setTextAlign(Paint.Align.CENTER);
         small.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        linePaint.setColor(0xCC000000);
+        hudP.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        btnP.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         menuRect.set(8 * dp, 8 * dp, 56 * dp, 56 * dp);
     }
 
     // ------------------------------------------------------------ config
     private void readPrefs() {
         Context c = getContext();
-        appearance = Prefs.i(c, "appearance", 0);
+        look = Prefs.i(c, "look", 0);
+        mode = Prefs.i(c, "mode", 0);
         hfmt = Prefs.i(c, "hfmt", DateFormat.is24HourFormat(c) ? 1 : 0);
         showDate = Prefs.b(c, "date", true);
         showSec = Prefs.b(c, "sec", true);
@@ -76,16 +96,21 @@ public class FlipClockView extends View {
         pos = Prefs.i(c, "pos", 0);
         tileAlpha = 1f - Prefs.i(c, "trans", 0) / 100f;
         blurR = Prefs.i(c, "blur", 8);
+        ovBg = Prefs.i(c, "col_bg", 0);
+        ovTile = Prefs.i(c, "col_tile", 0);
+        ovDigit = Prefs.i(c, "col_digit", 0);
         try { fmtDate = new SimpleDateFormat(Prefs.s(c, "datefmt", "yyyy/MM/dd"), Locale.getDefault()); }
         catch (IllegalArgumentException e) { fmtDate = new SimpleDateFormat("yyyy/MM/dd", Locale.getDefault()); }
         fmtDay = new SimpleDateFormat("EEEE", Locale.getDefault());
+        fmtSmall = new SimpleDateFormat(hfmt == 1 ? "HH:mm" : "h:mm a", Locale.getDefault());
+        minKey = "";
     }
 
     public void reload() {
         readPrefs();
         rev = Prefs.rev(getContext());
         final Context c = getContext().getApplicationContext();
-        final int a = appearance;
+        final int a = look;
         new Thread(new Runnable() {
             public void run() {
                 Bitmap s = null;
@@ -94,9 +119,18 @@ public class FlipClockView extends View {
                     if (f.exists()) s = Img.decodeFile(f, Img.reqLong(c));
                 }
                 final Bitmap fs = s;
-                post(new Runnable() { public void run() { src = fs; hNow = ""; rebuild(); tick(); } });
+                post(new Runnable() { public void run() { src = fs; t1Now = ""; rebuild(); tick(); } });
             }
         }).start();
+    }
+
+    public void setMode(int m) {
+        mode = m;
+        Prefs.put(getContext(), "mode", m);
+        t1Now = "";
+        overrunBeeped = false;
+        doLayout(getWidth(), getHeight());
+        tick();
     }
 
     public void start() {
@@ -118,55 +152,72 @@ public class FlipClockView extends View {
 
     @Override protected void onDetachedFromWindow() { stop(); super.onDetachedFromWindow(); }
 
-    // ------------------------------------------------------------ background + colours
+    // ------------------------------------------------------------ layout
     @Override protected void onSizeChanged(int w, int h, int ow, int oh) { rebuild(); }
 
-    private void layout(int w, int h) {
-        boolean land = w > h;
-        float mg = Math.min(w, h) * 0.06f;
-        if (!land) {
-            float tw = w - 2 * mg, th = Math.min((h - 3 * mg) / 2f, tw * 1.15f), top = (h - 2 * th - mg) / 2f;
-            hr.set(mg, top, mg + tw, top + th);
-            mr.set(mg, top + th + mg, mg + tw, top + 2 * th + mg);
-        } else {
-            float th = h - 2 * mg, tw = Math.min((w - 3 * mg) / 2f, th * 1.15f), left = (w - 2 * tw - mg) / 2f;
-            hr.set(left, mg, left + tw, mg + th);
-            mr.set(left + tw + mg, mg, left + 2 * tw + mg, mg + th);
+    private void doLayout(int w, int h) {
+        if (w <= 0 || h <= 0) return;
+        float top = mode == 0 ? 0 : 64 * dp, bot = mode == 0 ? 0 : 96 * dp;
+        float availH = h - top - bot, mg = Math.min(w, h) * 0.05f, gap = mg, side;
+        if (w <= h) {   // portrait: stacked, both tiles perfectly square
+            side = Math.max(10, Math.min(w - 2 * mg, (availH - gap - 2 * mg) / 2f));
+            float x = (w - side) / 2f, y0 = top + (availH - 2 * side - gap) / 2f;
+            hr.set(x, y0, x + side, y0 + side);
+            mr.set(x, y0 + side + gap, x + side, y0 + 2 * side + gap);
+        } else {        // landscape: side by side
+            side = Math.max(10, Math.min((w - 3 * mg) / 2f, availH - 2 * mg));
+            float x0 = (w - 2 * side - gap) / 2f, y0 = top + (availH - side) / 2f;
+            hr.set(x0, y0, x0 + side, y0 + side);
+            mr.set(x0 + side + gap, y0, x0 + 2 * side + gap, y0 + side);
         }
-        corner = Math.min(hr.width(), hr.height()) * 0.12f;
-        digit.setTextSize(hr.height() * 0.62f);
-        float tw = digit.measureText("88"), maxW = hr.width() * 0.86f;
+        corner = side * 0.12f;
+        splitGap = Math.max(3 * dp, side * 0.012f);
+        digit.setTextSize(side * 0.62f);
+        float tw = digit.measureText("88"), maxW = side * 0.86f;
         if (tw > maxW) digit.setTextSize(digit.getTextSize() * maxW / tw);
         Rect b = new Rect();
         digit.getTextBounds("8", 0, 1, b);
         digitOff = -(b.top + b.bottom) / 2f;
-        small.setTextSize(hr.height() * 0.075f);
+        small.setTextSize(side * 0.075f);
+
+        nBtn = 0;
+        if (mode != 0) {
+            float bh = 48 * dp, by = h - 24 * dp - bh, rowW = Math.min(w - 2 * mg, 520 * dp), x = (w - rowW) / 2f, g = 8 * dp;
+            int[] ids = mode == 1 ? new int[]{B_PRESET, B_START, B_SKIP, B_STOP} : new int[]{B_FLOW, B_FEND};
+            float[] wt = mode == 1 ? new float[]{1.5f, 1.2f, 1f, 1f} : new float[]{1f, 1f};
+            float sum = 0;
+            for (float v : wt) sum += v;
+            float usable = rowW - g * (ids.length - 1);
+            for (int i = 0; i < ids.length; i++) {
+                float bw = usable * wt[i] / sum;
+                btn[i].set(x, by, x + bw, by + bh);
+                btnId[i] = ids[i];
+                x += bw + g;
+            }
+            nBtn = ids.length;
+        }
     }
 
+    // ------------------------------------------------------------ background + colours
     private void drawImage(Canvas c, int w, int h) {
         int sw = src.getWidth(), sh = src.getHeight();
         Matrix m = new Matrix();
         switch (pos) {
-            case 1: // Scaled (stretch)
-                m.setScale((float) w / sw, (float) h / sh);
-                break;
-            case 2: { // Scaled, keep proportions
+            case 1: m.setScale((float) w / sw, (float) h / sh); break;           // Scaled
+            case 2: {                                                              // Scaled, keep proportions
                 float s = Math.min((float) w / sw, (float) h / sh);
                 m.setScale(s, s); m.postTranslate((w - sw * s) / 2f, (h - sh * s) / 2f);
                 c.drawColor(0xFF000000);
                 break;
             }
-            case 3: // Centered
-                m.setTranslate((w - sw) / 2f, (h - sh) / 2f);
-                c.drawColor(0xFF000000);
-                break;
-            case 4: { // Tiled
+            case 3: m.setTranslate((w - sw) / 2f, (h - sh) / 2f); c.drawColor(0xFF000000); break; // Centered
+            case 4: {                                                              // Tiled
                 Paint p = new Paint();
                 p.setShader(new BitmapShader(src, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT));
                 c.drawRect(0, 0, w, h, p);
                 return;
             }
-            default: { // Scaled and Cropped (fill)
+            default: {                                                             // Scaled and Cropped
                 float s = Math.max((float) w / sw, (float) h / sh);
                 m.setScale(s, s); m.postTranslate((w - sw * s) / 2f, (h - sh * s) / 2f);
             }
@@ -177,25 +228,25 @@ public class FlipClockView extends View {
     private void rebuild() {
         int w = getWidth(), h = getHeight();
         if (w <= 0 || h <= 0) return;
-        layout(w, h);
+        doLayout(w, h);
         full.set(0, 0, w, h);
         Bitmap b = Bitmap.createBitmap(w, h, Bitmap.Config.RGB_565);
         Canvas c = new Canvas(b);
         boolean image = false;
-        if (appearance == Prefs.A_LIGHT) c.drawColor(0xFFE6E6E6);
-        else if (appearance >= Prefs.A_PRESET0 && appearance < Prefs.A_WALLHAVEN) Scenes.draw(appearance - Prefs.A_PRESET0, c, w, h);
-        else if (src != null && (appearance == Prefs.A_WALLHAVEN || appearance == Prefs.A_LOCAL)) { drawImage(c, w, h); image = true; }
+        if (look == Prefs.A_LIGHT) c.drawColor(0xFFE6E6E6);
+        else if (look == Prefs.A_CUSTOM) c.drawColor(ovBg != 0 ? ovBg : 0xFF1E2430);
+        else if (src != null && (look == Prefs.A_WALLHAVEN || look == Prefs.A_LOCAL)) { drawImage(c, w, h); image = true; }
         else c.drawColor(0xFF000000);
         bg = b;
 
-        if (appearance == Prefs.A_LIGHT) { tileColor = 0xFFFFFFFF; digitColor = 0xFF2B2B2B; }
-        else if (appearance >= Prefs.A_PRESET0 && appearance < Prefs.A_WALLHAVEN) {
-            tileColor = Scenes.TILE[appearance - Prefs.A_PRESET0];
-            digitColor = Scenes.DIGIT[appearance - Prefs.A_PRESET0];
-        } else if (image) {
-            int[] cc = ColorUtil.adapt(b, tileAlpha);
-            tileColor = cc[0]; digitColor = cc[1];
-        } else { tileColor = 0xFF212121; digitColor = 0xFFB0B0B0; }
+        int avg = ColorUtil.avg(b), tile, dig;
+        if (look == Prefs.A_LIGHT) { tile = 0xFFFFFFFF; dig = 0xFF2B2B2B; }
+        else if (look == Prefs.A_CUSTOM || image) { tile = ColorUtil.accentTile(b); dig = 0; }
+        else { tile = 0xFF212121; dig = 0xFFB0B0B0; }
+        if (ovTile != 0) { tile = ovTile; if (!(look == Prefs.A_CUSTOM || image)) dig = 0; }
+        if (ovDigit != 0) dig = ovDigit; else if (dig == 0) dig = ColorUtil.digitFor(tile, avg, tileAlpha);
+        tileColor = tile; digitColor = dig;
+        hudColor = ColorUtil.lum(avg) < 0.45 ? 0xFFFFFFFF : 0xFF1A1A1A;
 
         blurBmp = null;
         if (tileAlpha < 0.99f && blurR > 0) {   // computed ONCE, on a ~1/6 size copy
@@ -213,26 +264,32 @@ public class FlipClockView extends View {
         invalidate();
     }
 
-    // ------------------------------------------------------------ time
-    private static String two(int v) { return v < 10 ? "0" + v : "" + v; }
+    // ------------------------------------------------------------ time / timers
+    private static String two(long v) { return v < 10 ? "0" + v : "" + v; }
+
+    private void beep() {
+        try {
+            final ToneGenerator tg = new ToneGenerator(AudioManager.STREAM_ALARM, 90);
+            tg.startTone(ToneGenerator.TONE_PROP_BEEP2, 700);
+            postDelayed(new Runnable() { public void run() { tg.release(); } }, 1200);
+        } catch (Exception ignored) { }
+    }
 
     private void tick() {
         handler.removeCallbacks(tickR);
         if (fmtDate == null) readPrefs();
+        Context c = getContext();
         Calendar cal = Calendar.getInstance();
         long now = cal.getTimeInMillis();
         boolean h24 = hfmt == 1;
         int hh = cal.get(h24 ? Calendar.HOUR_OF_DAY : Calendar.HOUR);
         if (!h24 && hh == 0) hh = 12;
-        String hs = two(hh), ms = two(cal.get(Calendar.MINUTE));
-        boolean first = hNow.isEmpty();
-        if (first || !hs.equals(hNow) || !ms.equals(mNow)) {
-            hFlip = !first && !hs.equals(hNow);
-            mFlip = !first && !ms.equals(mNow);
-            hOld = hNow; mOld = mNow; hNow = hs; mNow = ms;
-            if (hFlip || mFlip) flipStart = SystemClock.uptimeMillis();
+        String hs = two(hh), ms = two(cal.get(Calendar.MINUTE)), mk = hs + ms;
+        if (!mk.equals(minKey)) {
+            minKey = mk;
             dateS = fmtDate.format(cal.getTime());
             dayS = fmtDay.format(cal.getTime());
+            smallTime = fmtSmall.format(cal.getTime());
             if (shift) {
                 int idx = (int) ((now / 180000L) % 9);
                 shiftDx = (int) (((idx % 3) - 1) * 6 * dp);
@@ -241,17 +298,62 @@ public class FlipClockView extends View {
         }
         ampm = h24 ? "" : (cal.get(Calendar.AM_PM) == Calendar.AM ? "AM" : "PM");
         sec = showSec ? two(cal.get(Calendar.SECOND)) : "";
+
+        String n1, n2;
+        boolean live;
+        overrun = false;
+        if (mode == 0) {
+            n1 = hs; n2 = ms; u1 = u2 = ""; stateLabel = ""; live = showSec;
+        } else {
+            long v;
+            boolean countdown;
+            if (mode == 1) {
+                if (Timers.pAdvance(c, now)) beep();
+                int s = Timers.pState(c);
+                boolean pz = Timers.pPaused(c);
+                v = Timers.pRemaining(c, now);
+                countdown = true;
+                live = s != 0 && !pz;
+                rounds = Prefs.i(c, "tm_round", 0);
+                if (s == 0) { stateLabel = "READY"; stateColor = hudColor; }
+                else if (s == 1) { stateLabel = pz ? "FOCUS · PAUSED" : "FOCUS"; stateColor = 0xFFFF8A65; }
+                else { stateLabel = pz ? "BREAK · PAUSED" : "BREAK"; stateColor = 0xFF69F0AE; }
+            } else {
+                int s = Timers.fState(c);
+                v = s == 0 ? 0 : (s == 1 ? Timers.fElapsed(c, now) : Timers.fBreakRem(c, now));
+                countdown = s == 2;
+                live = s != 0;
+                overrun = s == 2 && v < 0;
+                if (s == 0) { stateLabel = "READY"; stateColor = hudColor; }
+                else if (s == 1) { stateLabel = "FLOW"; stateColor = 0xFF4FC3F7; }
+                else if (overrun) { stateLabel = "BREAK OVERRUN"; stateColor = 0xFFFF5252; }
+                else { stateLabel = "BREAK FLOW"; stateColor = 0xFF69F0AE; }
+                if (overrun && !overrunBeeped) { overrunBeeped = true; beep(); }
+                if (!overrun) overrunBeeped = false;
+            }
+            long secs = countdown ? (v < 0 ? (-v) / 1000 : (v + 999) / 1000) : v / 1000;
+            if (secs >= 6000) { n1 = two(secs / 3600); n2 = two(secs % 3600 / 60); u1 = "HR"; u2 = "MIN"; }
+            else { n1 = two(secs / 60); n2 = two(secs % 60); u1 = "MIN"; u2 = "SEC"; }
+        }
+
+        boolean first = t1Now.isEmpty();
+        if (first || !n1.equals(t1Now) || !n2.equals(t2Now)) {
+            f1 = !first && !n1.equals(t1Now);
+            f2 = !first && !n2.equals(t2Now);
+            t1Old = t1Now; t2Old = t2Now; t1Now = n1; t2Now = n2;
+            if (f1 || f2) flipStart = SystemClock.uptimeMillis();
+        }
         invalidate();
-        long period = showSec ? 1000 : 60000;
+        long period = live ? 1000 : 60000;
         handler.postDelayed(tickR, period - (now % period) + 5);
     }
 
     // ------------------------------------------------------------ drawing
-    private void drawText(Canvas c, String t, RectF r, int mode) {
+    private void drawText(Canvas c, String t, RectF r, int part) {
         c.save();
-        if (mode == 1) c.clipRect(r.left, r.top, r.right, r.centerY());
-        else if (mode == 2) c.clipRect(r.left, r.centerY(), r.right, r.bottom);
-        digit.setColor(digitColor);
+        if (part == 1) c.clipRect(r.left, r.top, r.right, r.centerY());
+        else if (part == 2) c.clipRect(r.left, r.centerY(), r.right, r.bottom);
+        digit.setColor(drawDigit);
         c.drawText(t, r.centerX(), r.centerY() + digitOff, digit);
         c.restore();
     }
@@ -292,8 +394,13 @@ public class FlipClockView extends View {
             drawText(c, old, r, 2);
             if (p < 0.5f) flap(c, r, old, true, 1 - 2 * p); else flap(c, r, nw, false, 2 * (p - 0.5f));
         }
-        float sw = Math.max(2f, 1.5f * dp), cy = r.centerY();
-        c.drawRect(r.left, cy - sw / 2, r.right, cy + sw / 2, linePaint);
+        // real split between top and bottom half: copy the background back over a thin strip
+        if (bg != null) {
+            float cy = r.centerY(), g = splitGap / 2f;
+            srcR.set((int) (r.left + shiftDx), (int) (cy - g + shiftDy), (int) (r.right + shiftDx), (int) (cy + g + shiftDy));
+            dstR.set(r.left, cy - g, r.right, cy + g);
+            c.drawBitmap(bg, srcR, dstR, null);
+        }
     }
 
     @Override protected void onDraw(Canvas c) {
@@ -301,41 +408,95 @@ public class FlipClockView extends View {
         float p = 1f;
         if (flipStart > 0) {
             p = (SystemClock.uptimeMillis() - flipStart) / (float) FLIP_MS;
-            if (p >= 1f) { p = 1f; hFlip = mFlip = false; flipStart = 0; }
+            if (p >= 1f) { p = 1f; f1 = f2 = false; flipStart = 0; }
             else postInvalidateOnAnimation();
         }
+        drawDigit = overrun ? 0xFFFF6B6B : digitColor;
         c.save();
         c.translate(shiftDx, shiftDy);
-        drawTile(c, hr, hNow, hOld, hFlip ? p : 1f);
-        drawTile(c, mr, mNow, mOld, mFlip ? p : 1f);
+        drawTile(c, hr, t1Now, t1Old, f1 ? p : 1f);
+        drawTile(c, mr, t2Now, t2Old, f2 ? p : 1f);
 
-        small.setColor((digitColor & 0x00FFFFFF) | 0xCC000000);
+        small.setColor((drawDigit & 0x00FFFFFF) | 0xCC000000);
         float pad = hr.height() * 0.06f, ty = hr.height() * 0.115f;
-        if (showDate) {
+        if (mode == 0) {
+            if (showDate) {
+                small.setTextAlign(Paint.Align.CENTER);
+                c.drawText(dateS, hr.centerX(), hr.top + ty, small);
+                c.drawText(dayS, mr.centerX(), mr.top + ty, small);
+            }
+            small.setTextAlign(Paint.Align.LEFT);
+            if (!ampm.isEmpty()) c.drawText(ampm, hr.left + pad, hr.bottom - pad, small);
+            small.setTextAlign(Paint.Align.RIGHT);
+            if (!sec.isEmpty()) {
+                float old = small.getTextSize();
+                small.setTextSize(old * 1.3f);
+                c.drawText(sec, mr.right - pad, mr.bottom - pad, small);
+                small.setTextSize(old);
+            }
+        } else {
             small.setTextAlign(Paint.Align.CENTER);
-            c.drawText(dateS, hr.centerX(), hr.top + ty, small);
-            c.drawText(dayS, mr.centerX(), mr.top + ty, small);
-        }
-        small.setTextAlign(Paint.Align.LEFT);
-        if (!ampm.isEmpty()) c.drawText(ampm, hr.left + pad, hr.bottom - pad, small);
-        small.setTextAlign(Paint.Align.RIGHT);
-        if (!sec.isEmpty()) {
-            float old = small.getTextSize();
-            small.setTextSize(old * 1.3f);
-            c.drawText(sec, mr.right - pad, mr.bottom - pad, small);
-            small.setTextSize(old);
+            c.drawText(u1, hr.centerX(), hr.top + ty, small);
+            c.drawText(u2, mr.centerX(), mr.top + ty, small);
+            if (overrun) {   // minus sign
+                Paint m = new Paint(Paint.ANTI_ALIAS_FLAG);
+                m.setColor(0xFFFF6B6B);
+                c.drawRoundRect(new RectF(hr.left + pad, hr.bottom - pad - 5 * dp, hr.left + pad + 20 * dp, hr.bottom - pad), 2 * dp, 2 * dp, m);
+            }
         }
         c.restore();
 
         if (showBat && batPct >= 0) drawBattery(c);
-        if (menuVisible) drawMenu(c);
+        if (mode != 0) drawHud(c);
+        if (menuVisible || mode != 0) drawMenu(c);
+    }
+
+    private void drawHud(Canvas c) {
+        hudP.setColor(hudColor);
+        hudP.setTextSize(22 * dp);
+        hudP.setTextAlign(Paint.Align.RIGHT);
+        c.drawText(smallTime, getWidth() - 14 * dp, 54 * dp, hudP);
+        hudP.setColor(stateColor);
+        hudP.setTextSize(16 * dp);
+        hudP.setLetterSpacing(0.12f);
+        hudP.setTextAlign(Paint.Align.CENTER);
+        c.drawText(stateLabel, getWidth() / 2f, 36 * dp, hudP);
+        hudP.setLetterSpacing(0f);
+        if (mode == 1 && rounds > 0) {
+            int n = Math.min(rounds, 8);
+            float x0 = getWidth() / 2f - (n - 1) * 5 * dp;
+            hudP.setColor(0xFFFF8A65);
+            for (int i = 0; i < n; i++) c.drawCircle(x0 + i * 10 * dp, 50 * dp, 3 * dp, hudP);
+        }
+        for (int i = 0; i < nBtn; i++) drawButton(c, btn[i], labelFor(btnId[i]), btnId[i] == B_START || btnId[i] == B_FLOW);
+    }
+
+    private String labelFor(int id) {
+        Context c = getContext();
+        switch (id) {
+            case B_PRESET: return Timers.focusMin(c) + " / " + Timers.breakMin(c) + " min ▲";
+            case B_START: return Timers.pState(c) == 0 ? "Start" : (Timers.pPaused(c) ? "Resume" : "Pause");
+            case B_SKIP: return "Skip";
+            case B_STOP: return "Stop";
+            case B_FLOW: return Timers.fState(c) == 1 ? "Break" : "Start";
+            default: return "End Session";
+        }
+    }
+
+    private void drawButton(Canvas c, RectF r, String label, boolean primary) {
+        btnP.setStyle(Paint.Style.FILL);
+        btnP.setColor(primary ? digitColor : tileColor);
+        c.drawRoundRect(r, r.height() / 2f, r.height() / 2f, btnP);
+        btnP.setColor(primary ? tileColor : digitColor);
+        btnP.setTextSize(15 * dp);
+        btnP.setTextAlign(Paint.Align.CENTER);
+        c.drawText(label, r.centerX(), r.centerY() - (btnP.ascent() + btnP.descent()) / 2f, btnP);
     }
 
     private void drawBattery(Canvas c) {
-        float bw = 22 * dp, bh = 11 * dp, x = getWidth() - 14 * dp - bw, y = 12 * dp;
-        int col = (digitColor & 0x00FFFFFF) | 0xDD000000;
+        float bw = 22 * dp, bh = 11 * dp, x = getWidth() - 14 * dp - bw, y = 10 * dp;
         Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-        p.setColor(col);
+        p.setColor((hudColor & 0x00FFFFFF) | 0xDD000000);
         p.setStyle(Paint.Style.STROKE);
         p.setStrokeWidth(1.5f * dp);
         c.drawRoundRect(new RectF(x, y, x + bw, y + bh), 2 * dp, 2 * dp, p);
@@ -353,21 +514,130 @@ public class FlipClockView extends View {
         c.drawCircle(menuRect.centerX(), menuRect.centerY(), 24 * dp, p);
         p.setColor(0xFFFFFFFF);
         for (int i = -1; i <= 1; i++)
-            c.drawRect(menuRect.centerX() - 9 * dp, menuRect.centerY() + i * 6 * dp - 1 * dp,
-                    menuRect.centerX() + 9 * dp, menuRect.centerY() + i * 6 * dp + 1 * dp, p);
+            c.drawRect(menuRect.centerX() - 9 * dp, menuRect.centerY() + i * 6 * dp - dp,
+                    menuRect.centerX() + 9 * dp, menuRect.centerY() + i * 6 * dp + dp, p);
     }
 
+    // ------------------------------------------------------------ touch
     @Override public boolean onTouchEvent(MotionEvent e) {
-        if (e.getAction() == MotionEvent.ACTION_UP) {
-            if (menuVisible && menuRect.contains(e.getX(), e.getY())) {
-                if (host != null) host.openSettings();
+        switch (e.getAction()) {
+            case MotionEvent.ACTION_DOWN:
+                downX = e.getX(); downY = e.getY();
+                edge = downX < 64 * dp; swiped = false;
                 return true;
-            }
-            menuVisible = !menuVisible;
-            handler.removeCallbacks(hideMenu);
-            if (menuVisible) handler.postDelayed(hideMenu, 4000);
-            invalidate();
+            case MotionEvent.ACTION_MOVE:
+                if (edge && !swiped) {
+                    float dx = e.getX() - downX, dy = e.getY() - downY;
+                    if (dx > 48 * dp && Math.abs(dx) > Math.abs(dy) * 1.5f) { swiped = true; if (host != null) host.openDrawer(); }
+                }
+                return true;
+            case MotionEvent.ACTION_UP:
+                if (swiped) return true;
+                float x = e.getX(), y = e.getY();
+                if ((menuVisible || mode != 0) && menuRect.contains(x, y)) { if (host != null) host.openDrawer(); return true; }
+                if (mode != 0) {
+                    for (int i = 0; i < nBtn; i++) if (btn[i].contains(x, y)) { onButton(btnId[i]); return true; }
+                    return true;
+                }
+                menuVisible = !menuVisible;
+                handler.removeCallbacks(hideMenu);
+                if (menuVisible) handler.postDelayed(hideMenu, 4000);
+                invalidate();
+                return true;
+            default:
+                return true;
         }
-        return true;
+    }
+
+    private void onButton(int id) {
+        Context c = getContext();
+        long now = System.currentTimeMillis();
+        switch (id) {
+            case B_START: Timers.pStartPause(c, now); break;
+            case B_SKIP: Timers.pSkip(c, now); break;
+            case B_STOP: Timers.pStop(c); break;
+            case B_PRESET:
+                if (Timers.pState(c) != 0) Toast.makeText(c, "Stop the timer to change durations", Toast.LENGTH_SHORT).show();
+                else showPresetMenu(btn[0]);
+                return;
+            case B_FLOW: Timers.fStartBreak(c, now); break;
+            default: {
+                long tot = Timers.fEnd(c, now);
+                Toast.makeText(c, "Session total: " + (tot / 60000) + " min of flow", Toast.LENGTH_LONG).show();
+            }
+        }
+        overrunBeeped = false;
+        tick();
+    }
+
+    /** Drop-up menu: opens above the button because the buttons sit at the bottom of the screen. */
+    private void showPresetMenu(RectF anchor) {
+        final Context c = getContext();
+        LinearLayout l = new LinearLayout(c);
+        l.setOrientation(LinearLayout.VERTICAL);
+        GradientDrawable bgd = new GradientDrawable();
+        bgd.setColor(0xF2202020);
+        bgd.setCornerRadius(12 * dp);
+        l.setBackground(bgd);
+        int sel = Prefs.i(c, "tm_preset", 0);
+        String[] items = {"25 / 5 minutes", "50 / 10 minutes", "90 / 20 minutes",
+                "Custom (" + Prefs.i(c, "tm_focus", 25) + " / " + Prefs.i(c, "tm_break", 5) + ")…"};
+        final PopupWindow pw = new PopupWindow(l, ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, true);
+        for (int i = 0; i < items.length; i++) {
+            TextView t = new TextView(c);
+            t.setText(items[i]);
+            t.setTextSize(16);
+            t.setTextColor(i == sel ? 0xFFFFD54F : 0xFFFFFFFF);
+            t.setPadding((int) (20 * dp), (int) (14 * dp), (int) (28 * dp), (int) (14 * dp));
+            final int idx = i;
+            t.setOnClickListener(new OnClickListener() {
+                public void onClick(View v) {
+                    pw.dismiss();
+                    if (idx == 3) customDialog();
+                    else { Prefs.put(c, "tm_preset", idx); tick(); }
+                }
+            });
+            l.addView(t);
+        }
+        pw.setOutsideTouchable(true);
+        pw.setBackgroundDrawable(new ColorDrawable(0));
+        l.measure(MeasureSpec.UNSPECIFIED, MeasureSpec.UNSPECIFIED);
+        int[] loc = new int[2];
+        getLocationOnScreen(loc);
+        pw.showAtLocation(this, Gravity.NO_GRAVITY, loc[0] + (int) anchor.left, loc[1] + (int) anchor.top - l.getMeasuredHeight() - (int) (8 * dp));
+    }
+
+    private EditText num(Context c, String hint, int v) {
+        EditText e = new EditText(c);
+        e.setInputType(InputType.TYPE_CLASS_NUMBER);
+        e.setHint(hint);
+        e.setText(String.valueOf(v));
+        return e;
+    }
+
+    private int parse(EditText e, int d) {
+        try { return Integer.parseInt(e.getText().toString().trim()); } catch (Exception x) { return d; }
+    }
+
+    private void customDialog() {
+        final Context c = getContext();
+        LinearLayout l = new LinearLayout(c);
+        l.setOrientation(LinearLayout.VERTICAL);
+        int p = (int) (16 * dp);
+        l.setPadding(p, p, p, p);
+        final EditText f = num(c, "Focus (minutes)", Prefs.i(c, "tm_focus", 25));
+        final EditText b = num(c, "Rest (minutes)", Prefs.i(c, "tm_break", 5));
+        l.addView(f);
+        l.addView(b);
+        new AlertDialog.Builder(c).setTitle("Custom focus / rest").setView(l)
+                .setPositiveButton("Save", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        Prefs.put(c, "tm_focus", Math.max(1, Math.min(240, parse(f, 25))));
+                        Prefs.put(c, "tm_break", Math.max(1, Math.min(60, parse(b, 5))));
+                        Prefs.put(c, "tm_preset", 3);
+                        tick();
+                    }
+                })
+                .setNegativeButton("Cancel", null).show();
     }
 }

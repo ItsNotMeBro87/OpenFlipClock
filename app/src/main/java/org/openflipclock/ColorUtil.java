@@ -26,17 +26,25 @@ final class ColorUtil {
         return Color.HSVToColor(new float[]{h, s, v});
     }
 
-    /** Returns {tileColor, digitColor} adapted to the picture. Tiny 32px sample, no libraries. */
-    static int[] adapt(Bitmap bg, float tileAlpha) {
+    /** Average colour of a picture (16x16 sample). */
+    static int avg(Bitmap bg) {
+        Bitmap s = Bitmap.createScaledBitmap(bg, 16, 16, true);
+        int[] px = new int[256];
+        s.getPixels(px, 0, 16, 0, 0, 16, 16);
+        long R = 0, G = 0, B = 0;
+        for (int p : px) { R += (p >> 16) & 255; G += (p >> 8) & 255; B += p & 255; }
+        return 0xFF000000 | ((int) (R / 256) << 16) | ((int) (G / 256) << 8) | (int) (B / 256);
+    }
+
+    /** Dark shade of the picture's dominant hue, used for the flipboard in automatic mode. */
+    static int accentTile(Bitmap bg) {
         int sw = 32, sh = Math.max(1, 32 * bg.getHeight() / bg.getWidth());
         Bitmap s = Bitmap.createScaledBitmap(bg, sw, sh, true);
         int[] px = new int[sw * sh];
         s.getPixels(px, 0, sw, 0, 0, sw, sh);
         double[] wt = new double[24], sat = new double[24];
-        long R = 0, G = 0, B = 0;
         float[] hsv = new float[3];
         for (int p : px) {
-            R += (p >> 16) & 255; G += (p >> 8) & 255; B += p & 255;
             Color.colorToHSV(p, hsv);
             double w = hsv[1] * hsv[2];
             int k = ((int) (hsv[0] / 15f)) % 24;
@@ -46,23 +54,25 @@ final class ColorUtil {
         for (int k = 1; k < 24; k++) if (wt[k] > wt[best]) best = k;
         float hue = 215f, sv = 0.3f;
         if (wt[best] > px.length * 0.02) { hue = best * 15f + 7.5f; sv = (float) (sat[best] / wt[best]); }
-        int n = px.length;
-        int avg = 0xFF000000 | ((int) (R / n) << 16) | ((int) (G / n) << 8) | (int) (B / n);
+        return hsv(hue, Math.min(0.65f, Math.max(0.25f, sv * 0.8f)), 0.22f);
+    }
 
-        int tile = hsv(hue, Math.min(0.65f, Math.max(0.25f, sv * 0.8f)), 0.22f);
-        int eff = blend(tile, avg, tileAlpha);   // what the digits really sit on
-        float comp = (hue + 180f) % 360f;        // bright complementary hue
-        int[] light = {hsv(comp, 0.35f, 1f), hsv(comp, 0.18f, 1f), 0xFFFFFFFF};
-        int[] dark = {hsv(comp, 0.65f, 0.14f), 0xFF000000};
-        int[][] order = ColorUtil.lum(eff) < 0.35 ? new int[][]{light, dark} : new int[][]{dark, light};
-
+    /** Brightest readable colour: the flipboard's own hue, tinted near-white (or near-black on light boards). */
+    static int digitFor(int tile, int avg, float tileAlpha) {
+        float[] t = new float[3];
+        Color.colorToHSV(tile, t);
+        float tint = t[1] > 0.08f ? 0.22f : 0f;
+        int eff = blend(tile, avg, tileAlpha);
+        int[] light = {hsv(t[0], tint, 1f), hsv(t[0], tint * 0.5f, 1f), 0xFFFFFFFF};
+        int[] dark = {hsv(t[0], Math.min(0.6f, tint * 2.5f), 0.12f), 0xFF000000};
+        int[][] order = lum(eff) < 0.35 ? new int[][]{light, dark} : new int[][]{dark, light};
         int pick = 0xFFFFFFFF; double bestC = 0;
         for (int[] set : order) for (int c : set) {
             double cr = contrast(c, eff);
-            if (cr >= 4.5) return new int[]{tile, c};
+            if (cr >= 4.5) return c;
             if (cr > bestC) { bestC = cr; pick = c; }
         }
-        return new int[]{tile, pick};
+        return pick;
     }
 
     // ---- fast box blur on int[] ARGB pixels (small downscaled copy only) ----

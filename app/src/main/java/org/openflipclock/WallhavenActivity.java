@@ -11,6 +11,7 @@ import android.util.LruCache;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.*;
 import java.util.ArrayList;
 import java.util.List;
@@ -103,14 +104,22 @@ public class WallhavenActivity extends Activity {
 
     @Override protected void onDestroy() { pool.shutdownNow(); super.onDestroy(); }
 
-    private void doSearch() { query = q.getText().toString().trim(); search(true); }
+    private void doSearch() {
+        query = q.getText().toString().trim();
+        InputMethodManager im = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (im != null) im.hideSoftInputFromWindow(q.getWindowToken(), 0);
+        search(true);
+    }
 
+    private int gen = 0;
+
+    /** A new search (reset) always wins over any request still in flight, so "Go" works immediately. */
     private void search(boolean reset) {
-        if (loading) return;
-        if (reset) { page = 1; items.clear(); ad.notifyDataSetChanged(); more = true; }
+        if (!reset && loading) return;
+        if (reset) { gen++; page = 1; items.clear(); ad.notifyDataSetChanged(); more = true; }
         loading = true;
         status.setText("Loading…");
-        final int pg = page;
+        final int pg = page, g = gen;
         final String qq = query;
         pool.execute(new Runnable() {
             public void run() {
@@ -118,13 +127,16 @@ public class WallhavenActivity extends Activity {
                     final List<Wallhaven.Item> r = Wallhaven.search(WallhavenActivity.this, qq, Wallhaven.SORTS[Prefs.i(WallhavenActivity.this, "wh_sort", 0)], pg);
                     runOnUiThread(new Runnable() {
                         public void run() {
+                            if (g != gen) return;
                             items.addAll(r); more = !r.isEmpty(); page++; loading = false;
                             ad.notifyDataSetChanged();
                             status.setText(items.isEmpty() ? "No results" : "");
                         }
                     });
                 } catch (final Exception e) {
-                    runOnUiThread(new Runnable() { public void run() { loading = false; status.setText("Error: " + e.getMessage()); } });
+                    runOnUiThread(new Runnable() {
+                        public void run() { if (g != gen) return; loading = false; status.setText("Error: " + e.getMessage()); }
+                    });
                 }
             }
         });
@@ -168,7 +180,7 @@ public class WallhavenActivity extends Activity {
             public void run() {
                 try {
                     Wallhaven.downloadAsBackground(c, it.path);
-                    Prefs.put(c, "appearance", Prefs.A_WALLHAVEN);
+                    Prefs.put(c, "look", Prefs.A_WALLHAVEN);
                     runOnUiThread(new Runnable() {
                         public void run() { Toast.makeText(WallhavenActivity.this, "Wallpaper set", Toast.LENGTH_SHORT).show(); finish(); }
                     });
@@ -272,7 +284,7 @@ public class WallhavenActivity extends Activity {
                         Prefs.put(c, "wh_wifi", wifi.isChecked());
                         Prefs.put(c, "wh_auto", on.isChecked());
                         Prefs.put(c, "wh_last", 0L);
-                        if (on.isChecked()) Prefs.put(c, "appearance", Prefs.A_WALLHAVEN);
+                        if (on.isChecked()) Prefs.put(c, "look", Prefs.A_WALLHAVEN);
                     }
                 })
                 .setNegativeButton("Cancel", null).show();

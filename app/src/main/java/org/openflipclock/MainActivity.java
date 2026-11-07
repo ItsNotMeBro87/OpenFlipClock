@@ -9,20 +9,98 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowManager;
+import android.widget.FrameLayout;
+import android.widget.LinearLayout;
+import android.widget.TextView;
+import android.widget.Toast;
 
 public class MainActivity extends Activity implements FlipClockView.Host {
     private FlipClockView v;
+    private LinearLayout drawer;
+    private View scrim;
+    private boolean open;
+    private int dw;
+    private final TextView[] items = new TextView[5];
     private final Handler h = new Handler(Looper.getMainLooper());
 
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
+        dw = Math.min(UI.dp(this, 260), (int) (getResources().getDisplayMetrics().widthPixels * 0.8f));
+        FrameLayout root = new FrameLayout(this);
+        root.setBackgroundColor(0xFF000000);
         v = new FlipClockView(this);
         v.host = this;
-        setContentView(v);
+        root.addView(v);
+        scrim = new View(this);
+        scrim.setBackgroundColor(0x99000000);
+        scrim.setVisibility(View.GONE);
+        scrim.setOnClickListener(new View.OnClickListener() { public void onClick(View x) { closeDrawer(); } });
+        root.addView(scrim);
+        buildDrawer(root);
+        setContentView(root);
     }
 
-    @Override public void openSettings() { startActivity(new Intent(this, SettingsActivity.class)); }
+    private void buildDrawer(FrameLayout root) {
+        drawer = new LinearLayout(this);
+        drawer.setOrientation(LinearLayout.VERTICAL);
+        drawer.setBackgroundColor(0xFA1A1A1A);
+        drawer.setPadding(0, UI.dp(this, 40), 0, 0);
+        TextView t = new TextView(this);
+        t.setText("OpenFlipClock");
+        t.setTextSize(20);
+        t.setTextColor(0xFFFFFFFF);
+        t.setPadding(UI.dp(this, 24), 0, 0, UI.dp(this, 16));
+        drawer.addView(t);
+        String[] names = {"FlipClock", "Pomodoro", "Flowmodoro", "Alarm  (v0.2.1)", "Settings"};
+        for (int i = 0; i < 5; i++) {
+            TextView it = new TextView(this);
+            it.setText(names[i]);
+            it.setTextSize(17);
+            it.setTextColor(i == 3 ? 0xFF777777 : 0xFFFFFFFF);
+            it.setPadding(UI.dp(this, 24), UI.dp(this, 16), UI.dp(this, 24), UI.dp(this, 16));
+            final int idx = i;
+            it.setOnClickListener(new View.OnClickListener() { public void onClick(View x) { select(idx); } });
+            items[i] = it;
+            drawer.addView(it);
+        }
+        root.addView(drawer, new FrameLayout.LayoutParams(dw, ViewGroup.LayoutParams.MATCH_PARENT));
+        drawer.setTranslationX(-dw);
+    }
+
+    private void select(int i) {
+        closeDrawer();
+        if (i <= 2) v.setMode(i);
+        else if (i == 3) Toast.makeText(this, "Alarms arrive in v0.2.1 Beta", Toast.LENGTH_SHORT).show();
+        else startActivity(new Intent(this, SettingsActivity.class));
+    }
+
+    @Override public void openDrawer() {
+        if (open) return;
+        open = true;
+        int mode = Prefs.i(this, "mode", 0);
+        for (int k = 0; k < 5; k++) items[k].setBackgroundColor(k == mode ? 0x33FFFFFF : 0);
+        scrim.setAlpha(0f);
+        scrim.setVisibility(View.VISIBLE);
+        scrim.animate().alpha(1f).setDuration(160);
+        drawer.animate().translationX(0).setDuration(180);
+    }
+
+    private void closeDrawer() {
+        if (!open) return;
+        open = false;
+        scrim.animate().alpha(0f).setDuration(160).withEndAction(new Runnable() {
+            public void run() { scrim.setVisibility(View.GONE); }
+        });
+        drawer.animate().translationX(-dw).setDuration(180);
+    }
+
+    @Override public void onBackPressed() {
+        if (open) closeDrawer();
+        else if (Prefs.i(this, "mode", 0) != 0) v.setMode(0);
+        else super.onBackPressed();
+    }
 
     @Override protected void onResume() {
         super.onResume();
@@ -86,7 +164,7 @@ public class MainActivity extends Activity implements FlipClockView.Host {
 
     private void scheduleAuto() {
         h.removeCallbacks(autoRun);
-        if (Prefs.i(this, "appearance", 0) != Prefs.A_WALLHAVEN || !Prefs.b(this, "wh_auto", false)) return;
+        if (Prefs.i(this, "look", 0) != Prefs.A_WALLHAVEN || !Prefs.b(this, "wh_auto", false)) return;
         long interval = Math.max(5, Prefs.l(this, "wh_interval", 30)) * 60000L;
         long delay = Math.max(1500, Prefs.l(this, "wh_last", 0) + interval - System.currentTimeMillis());
         h.postDelayed(autoRun, delay);

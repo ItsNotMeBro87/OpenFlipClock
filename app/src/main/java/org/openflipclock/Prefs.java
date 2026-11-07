@@ -3,9 +3,9 @@ package org.openflipclock;
 import android.content.Context;
 import android.content.SharedPreferences;
 
-/** Tiny SharedPreferences wrapper. Every write bumps "rev" so the clock knows to reload. */
+/** Tiny SharedPreferences wrapper. Settings writes bump "rev" so the clock knows to reload. */
 final class Prefs {
-    static final int A_DARK = 0, A_LIGHT = 1, A_PRESET0 = 2, A_WALLHAVEN = 7, A_LOCAL = 8;
+    static final int A_DARK = 0, A_LIGHT = 1, A_CUSTOM = 2, A_WALLHAVEN = 3, A_LOCAL = 4;
 
     static SharedPreferences sp(Context c) {
         return c.getApplicationContext().getSharedPreferences("ofc", Context.MODE_PRIVATE);
@@ -22,7 +22,8 @@ final class Prefs {
         else if (v instanceof Integer) e.putInt(k, (Integer) v);
         else if (v instanceof Long) e.putLong(k, (Long) v);
         else e.putString(k, (String) v);
-        if (!k.equals("wh_last")) e.putLong("rev", System.nanoTime());
+        // runtime state (timers, mode, last wallpaper update) must not trigger a background rebuild
+        if (!(k.equals("wh_last") || k.equals("mode") || k.startsWith("tm_"))) e.putLong("rev", System.nanoTime());
         e.apply();
     }
 }
