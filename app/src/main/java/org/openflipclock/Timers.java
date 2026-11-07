@@ -11,7 +11,7 @@ final class Timers {
     static int breakMin(Context c) { int p = Prefs.i(c, "tm_preset", 0); return p < 3 ? PRE[p][1] : Prefs.i(c, "tm_break", 5); }
 
     // ---------------- today's focus total ----------------
-    private static int dayNum() {
+    static int dayNum() {
         long n = System.currentTimeMillis();
         return (int) ((n + java.util.TimeZone.getDefault().getOffset(n)) / 86400000L);
     }

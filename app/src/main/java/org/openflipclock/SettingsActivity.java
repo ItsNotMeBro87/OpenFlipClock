@@ -22,7 +22,7 @@ public class SettingsActivity extends Activity {
     private LinearLayout root;
     private static final String[] DATE_FMT = {"yyyy/MM/dd", "dd/MM/yyyy", "MM/dd/yyyy", "yyyy-MM-dd", "d MMM yyyy", "EEE, d MMM"};
     /** Runtime state / user data that "Reset to default" must not wipe. */
-    private static final List<String> KEEP = Arrays.asList("wh_key", "alarms", "tm_pstate", "tm_pend", "tm_ppaused", "tm_prem",
+    private static final List<String> KEEP = Arrays.asList("wh_key", "px_key", "bing_day", "alarms", "tm_pstate", "tm_pend", "tm_ppaused", "tm_prem",
             "tm_round", "tm_plong", "tm_fstate", "tm_fstart", "tm_fend", "tm_ftotal", "tm_today", "tm_day");
     private final Runnable rec = new Runnable() { public void run() { recreate(); } };
 
@@ -57,20 +57,25 @@ public class SettingsActivity extends Activity {
         }
         add(UI.check(this, "Show seconds", "sec", true));
         add(UI.check(this, "Show battery percentage", "bat", false));
-        add(UI.sliderRow(this, "FlipClock size", "size_clock", 100, 100, "%"));
+        add(UI.sliderRow(this, "FlipClock size (100% = fits the screen)", "size_clock", 130, 100, "%"));
 
         // ---- Appearance: only the options that belong to the chosen appearance are shown ----
         add(UI.label(this, "Appearance", true));
-        add(UI.choiceRow(this, "Appearance", new String[]{"Dark", "Light", "Custom color", "Wallhaven", "Local image"}, "look", 0, new UI.IntCb() {
+        add(UI.choiceRow(this, "Appearance", new String[]{"Dark", "Light", "Custom color", "Wallhaven", "Local image", "Pexels", "Bing daily"}, "look", 0, new UI.IntCb() {
             public void run(int v) {
                 if (v == Prefs.A_WALLHAVEN && !new File(getFilesDir(), "bg_wh.jpg").exists()) openWallhaven();
                 if (v == Prefs.A_LOCAL && !new File(getFilesDir(), "bg_local.jpg").exists()) pickImage();
+                if ((v == Prefs.A_PEXELS || v == Prefs.A_BING) && !new File(getFilesDir(), Prefs.bgFile(v)).exists()) openSource(v == Prefs.A_PEXELS);
                 recreate();
             }
         }));
         if (look == Prefs.A_CUSTOM) add(UI.colorRow(this, "Background color", "col_bg"));
         if (look == Prefs.A_WALLHAVEN)
             add(UI.button(this, "Browse Wallhaven…", new View.OnClickListener() { public void onClick(View v) { openWallhaven(); } }));
+        if (look == Prefs.A_PEXELS)
+            add(UI.button(this, "Browse Pexels…", new View.OnClickListener() { public void onClick(View v) { openSource(true); } }));
+        if (look == Prefs.A_BING)
+            add(UI.button(this, "Browse Bing daily…", new View.OnClickListener() { public void onClick(View v) { openSource(false); } }));
         if (look == Prefs.A_LOCAL)
             add(UI.button(this, "Choose local image…", new View.OnClickListener() { public void onClick(View v) { pickImage(); } }));
         if (look >= Prefs.A_WALLHAVEN)
@@ -82,7 +87,8 @@ public class SettingsActivity extends Activity {
 
         // ---- Timers ----
         add(UI.label(this, "Pomodoro / Flowmodoro", true));
-        add(UI.sliderRow(this, "Pomodoro / Flowmodoro size", "size_timer", 100, 100, "%"));
+        add(UI.sliderRow(this, "Pomodoro / Flowmodoro size (100% = fits the screen)", "size_timer", 130, 100, "%"));
+        add(UI.choiceRow(this, "Timer buttons position (landscape)", new String[]{"Bottom", "Left side", "Right side"}, "tm_btnpos", 0, null));
         add(UI.choiceRow(this, "Flowmodoro break length", new String[]{"1/3 of flow time", "1/5 of flow time", "1/8 of flow time"}, "tm_ratio", 1, null));
         add(UI.check(this, "Auto-start focus after a Pomodoro break", "tm_auto", false));
         add(UI.check(this, "Long break after every 4 Pomodoro rounds", "tm_longon", true, rec));
@@ -125,16 +131,17 @@ public class SettingsActivity extends Activity {
         add(UI.button(this, "Reset to default", new View.OnClickListener() {
             public void onClick(View v) {
                 new AlertDialog.Builder(SettingsActivity.this).setTitle("Reset all settings?")
-                    .setMessage("Colors, appearance, timers and display options go back to defaults. Your alarms and Wallhaven API key are kept.")
+                    .setMessage("Colors, appearance, timers and display options go back to defaults. Your alarms and API keys are kept.")
                     .setPositiveButton("Reset", new DialogInterface.OnClickListener() {
                         public void onClick(DialogInterface d, int w) { resetDefaults(); }
                     }).setNegativeButton("Cancel", null).show();
             }
         }));
-        add(UI.button(this, "Clear Wallhaven API key", new View.OnClickListener() {
+        add(UI.button(this, "Clear API keys (Wallhaven, Pexels)", new View.OnClickListener() {
             public void onClick(View v) {
                 Prefs.put(SettingsActivity.this, "wh_key", "");
-                Toast.makeText(SettingsActivity.this, "API key cleared", Toast.LENGTH_SHORT).show();
+                Prefs.put(SettingsActivity.this, "px_key", "");
+                Toast.makeText(SettingsActivity.this, "API keys cleared", Toast.LENGTH_SHORT).show();
             }
         }));
 
@@ -151,6 +158,8 @@ public class SettingsActivity extends Activity {
         e.putLong("rev", System.nanoTime()).apply();
         recreate();
     }
+
+    private void openSource(boolean pexels) { startActivity(new Intent(this, SourceActivity.class).putExtra("kind", pexels ? "px" : "bing")); }
 
     private void openWallhaven() { startActivity(new Intent(this, WallhavenActivity.class)); }
 

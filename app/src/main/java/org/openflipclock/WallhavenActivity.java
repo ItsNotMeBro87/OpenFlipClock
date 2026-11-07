@@ -165,7 +165,7 @@ public class WallhavenActivity extends Activity {
         if (bm != null) iv.setImageBitmap(bm); else load(it.large, iv);
         new AlertDialog.Builder(this)
                 .setTitle(it.res)
-                .setView(iv)
+                .setView(UI.scroll(this, iv))
                 .setPositiveButton("Set as wallpaper", new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) { setWallpaper(it); }
                 })
@@ -231,7 +231,7 @@ public class WallhavenActivity extends Activity {
         e.setSingleLine(true);
         e.setHint("Wallhaven API key (optional, for NSFW)");
         e.setText(Prefs.s(this, "wh_key", ""));
-        new AlertDialog.Builder(this).setTitle("API key").setView(e)
+        new AlertDialog.Builder(this).setTitle("API key").setView(UI.scroll(this, e))
                 .setPositiveButton("Save", new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) { Prefs.put(WallhavenActivity.this, "wh_key", e.getText().toString().trim()); }
                 })
@@ -273,7 +273,7 @@ public class WallhavenActivity extends Activity {
         TextView note = UI.label(c, "Pictures are not collected: each new wallpaper replaces the previous one. Runs only while the clock is on screen. Minimum 5 minutes.", false);
         note.setTextSize(12);
         l.addView(note);
-        new AlertDialog.Builder(c).setTitle("Auto-update").setView(l)
+        new AlertDialog.Builder(c).setTitle("Auto-update").setView(UI.scroll(c, l))
                 .setPositiveButton("Save", new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         long v = 30;

@@ -14,11 +14,12 @@ import android.view.WindowManager;
 import java.util.Calendar;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 public class MainActivity extends Activity implements FlipClockView.Host {
     private FlipClockView v;
-    private LinearLayout drawer;
+    private ScrollView drawer;
     private View scrim;
     private boolean open;
     private int dw;
@@ -44,22 +45,24 @@ public class MainActivity extends Activity implements FlipClockView.Host {
     }
 
     private void buildDrawer(FrameLayout root) {
-        drawer = new LinearLayout(this);
-        drawer.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout col = new LinearLayout(this);   // the drawer scrolls, so every item is reachable in landscape
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setPadding(0, UI.dp(this, 40), 0, UI.dp(this, 16));
+        drawer = new ScrollView(this);
         drawer.setBackgroundColor(0xFA1A1A1A);
-        drawer.setPadding(0, UI.dp(this, 40), 0, 0);
+        drawer.addView(col);
         TextView t = new TextView(this);
         t.setText("OpenFlipClock");
         t.setTextSize(20);
         t.setTextColor(0xFFFFFFFF);
         t.setPadding(UI.dp(this, 24), 0, 0, 0);
-        drawer.addView(t);
+        col.addView(t);
         TextView ver = new TextView(this);
         ver.setText(UI.VERSION);
         ver.setTextSize(13);
         ver.setTextColor(0xFF9E9E9E);
         ver.setPadding(UI.dp(this, 24), UI.dp(this, 2), 0, UI.dp(this, 16));
-        drawer.addView(ver);
+        col.addView(ver);
         String[] names = {"FlipClock", "Pomodoro", "Flowmodoro", "Alarm", "Settings", "Credit"};
         for (int i = 0; i < 6; i++) {
             TextView it = new TextView(this);
@@ -70,7 +73,7 @@ public class MainActivity extends Activity implements FlipClockView.Host {
             final int idx = i;
             it.setOnClickListener(new View.OnClickListener() { public void onClick(View x) { select(idx); } });
             items[i] = it;
-            drawer.addView(it);
+            col.addView(it);
         }
         root.addView(drawer, new FrameLayout.LayoutParams(dw, ViewGroup.LayoutParams.MATCH_PARENT));
         drawer.setTranslationX(-dw);
@@ -118,6 +121,7 @@ public class MainActivity extends Activity implements FlipClockView.Host {
         v.start();
         scheduleAuto();
         brightRun.run();
+        checkBing();
     }
 
     @Override protected void onPause() {
@@ -151,6 +155,25 @@ public class MainActivity extends Activity implements FlipClockView.Host {
             getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
             d.setSystemUiVisibility(View.SYSTEM_UI_FLAG_VISIBLE);
         }
+    }
+
+    // ---- Bing daily: refresh the picture once a day when the clock is opened (optional) ----
+    private void checkBing() {
+        if (Prefs.i(this, "look", 0) != Prefs.A_BING || !Prefs.b(this, "bing_auto", false)) return;
+        final Context c = getApplicationContext();
+        final int today = Timers.dayNum();
+        if (Prefs.i(c, "bing_day", -1) == today) return;
+        Prefs.put(c, "bing_day", today);
+        new Thread(new Runnable() {
+            public void run() {
+                try {
+                    ConnectivityManager cm = (ConnectivityManager) c.getSystemService(Context.CONNECTIVITY_SERVICE);
+                    if (Prefs.b(c, "wh_wifi", true) && cm.isActiveNetworkMetered()) { Prefs.put(c, "bing_day", -1); return; }
+                    Sources.bingAuto(c);
+                } catch (Exception e) { Prefs.put(c, "bing_day", -1); return; }
+                h.post(new Runnable() { public void run() { v.reload(); v.rev = Prefs.rev(c); } });
+            }
+        }).start();
     }
 
     // ---- Brightness + optional night dimming schedule (re-checked once a minute while on screen) ----

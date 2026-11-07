@@ -29,6 +29,8 @@ public class CreditActivity extends Activity {
         l.addView(line("itsnotmebro87 and Claude", 16, 0xFF212121));
         l.addView(line("License", 13, 0xFF00796B));
         l.addView(line("GNU General Public License v3.0 (GPLv3)", 16, 0xFF212121));
+        l.addView(line("Wallpaper sources", 13, 0xFF00796B));
+        l.addView(line("Wallhaven (wallhaven.cc), Pexels (pexels.com) and the Bing daily image. Pictures remain the property of their authors.", 16, 0xFF212121));
         l.addView(line("GitHub", 13, 0xFF00796B));
         TextView link = line("https://github.com/ItsNotMeBro87/OpenFlipClock", 16, 0xFF212121);
         Linkify.addLinks(link, Linkify.WEB_URLS);

@@ -10,6 +10,7 @@ import android.view.View;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -58,7 +59,11 @@ public class AlarmRingActivity extends Activity {
         lp.setMargins(0, UI.dp(this, 8), 0, UI.dp(this, 8));
         l.addView(snooze, lp);
         l.addView(dismiss, lp);
-        setContentView(l);
+        ScrollView sv = new ScrollView(this);
+        sv.setFillViewport(true);
+        sv.setBackgroundColor(0xFF000000);
+        sv.addView(l, new ScrollView.LayoutParams(ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.WRAP_CONTENT));
+        setContentView(sv);
     }
 
     private void send(String action, int id) {

@@ -8,7 +8,7 @@ import android.widget.*;
 
 /** Small helpers so the settings screens stay plain framework widgets (light on RAM/APK size). */
 final class UI {
-    static final String VERSION = "v0.2.1 Beta";
+    static final String VERSION = "v0.2.2 Beta";
 
     interface IntCb { void run(int v); }
 
@@ -192,5 +192,11 @@ final class UI {
             }
         });
         return r;
+    }
+
+    static ScrollView scroll(Context c, View v) {
+        ScrollView s = new ScrollView(c);
+        s.addView(v);
+        return s;
     }
 }

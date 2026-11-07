@@ -29,3 +29,8 @@ for Pomodoro/Flowmodoro while the app is closed, long break after 4 rounds + tod
 display corner radius, brightness + night dimming schedule, optional screensaver, settings that show only options
 for the chosen appearance, Credit screen, scrollable color picker, larger timer layout.
 Planned for v0.2.2: Pexels and Bing daily wallpaper sources.
+
+## v0.2.2 Beta changes
+Pexels (own free API key) and Bing daily image sources, scrollable drawer and dialogs (landscape),
+color picker laid out side by side in landscape, timer buttons position option (bottom/left/right in landscape),
+size sliders up to 130%.

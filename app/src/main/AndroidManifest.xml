@@ -31,6 +31,7 @@
         <activity android:name=".SettingsActivity" android:label="OpenFlipClock Settings" />
         <activity android:name=".WallhavenActivity" android:label="Wallhaven" />
         <activity android:name=".CreditActivity" android:label="Credit" />
+        <activity android:name=".SourceActivity" />
         <activity
             android:name=".AlarmActivity"
             android:label="Alarms"

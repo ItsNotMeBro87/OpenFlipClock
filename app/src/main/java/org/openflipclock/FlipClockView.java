@@ -30,7 +30,7 @@ public class FlipClockView extends View {
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final float dp;
-    private int look, pos, blurR, hfmt, mode, ovBg, ovTile, ovDigit;
+    private int look, pos, blurR, hfmt, mode, ovBg, ovTile, ovDigit, btnPos;
     private boolean showDate, showSec, showBat, shift;
     private float tileAlpha = 1f, cornerR, sizeClock = 1f, sizeTimer = 1f;
     private String bellText = "";
@@ -106,13 +106,14 @@ public class FlipClockView extends View {
         ovBg = Prefs.i(c, "col_bg", 0);
         ovTile = Prefs.i(c, "col_tile", 0);
         ovDigit = Prefs.i(c, "col_digit", 0);
+        btnPos = Prefs.i(c, "tm_btnpos", 0);   // landscape timer buttons: 0 bottom, 1 left, 2 right
         try { fmtDate = new SimpleDateFormat(Prefs.s(c, "datefmt", "yyyy/MM/dd"), Locale.getDefault()); }
         catch (IllegalArgumentException e) { fmtDate = new SimpleDateFormat("yyyy/MM/dd", Locale.getDefault()); }
         fmtDay = new SimpleDateFormat("EEEE", Locale.getDefault());
         fmtSmall = new SimpleDateFormat(hfmt == 1 ? "HH:mm" : "h:mm a", Locale.getDefault());
         cornerR = Prefs.i(c, "disp_radius", 0) * dp;
-        sizeClock = Math.max(0.5f, Prefs.i(c, "size_clock", 100) / 100f);
-        sizeTimer = Math.max(0.5f, Prefs.i(c, "size_timer", 100) / 100f);
+        sizeClock = Math.min(1.3f, Math.max(0.5f, Prefs.i(c, "size_clock", 100) / 100f));
+        sizeTimer = Math.min(1.3f, Math.max(0.5f, Prefs.i(c, "size_timer", 100) / 100f));
         if (dream) mode = 0;
         minKey = "";
     }
@@ -125,8 +126,8 @@ public class FlipClockView extends View {
         new Thread(new Runnable() {
             public void run() {
                 Bitmap s = null;
-                if (a == Prefs.A_WALLHAVEN || a == Prefs.A_LOCAL) {
-                    File f = new File(c.getFilesDir(), a == Prefs.A_WALLHAVEN ? "bg_wh.jpg" : "bg_local.jpg");
+                if (a >= Prefs.A_WALLHAVEN) {
+                    File f = new File(c.getFilesDir(), Prefs.bgFile(a));
                     if (f.exists()) s = Img.decodeFile(f, Img.reqLong(c));
                 }
                 final Bitmap fs = s;
@@ -187,7 +188,7 @@ public class FlipClockView extends View {
             int[] ids = mode == 1 ? new int[]{B_PRESET, B_START, B_SKIP, B_STOP} : new int[]{B_FLOW, B_FEND};
             float[] wt = mode == 1 ? new float[]{1.5f, 1.2f, 1f, 1f} : new float[]{1f, 1f};
             float bh = 44 * dp, g = 8 * dp;
-            if (!land) {   // buttons in a row at the bottom
+            if (!land || btnPos == 0) {   // buttons in a row at the bottom (always in portrait)
                 float by = h - 20 * dp - bh - inset * 0.5f, rowW = Math.min(w - 2 * mg, 520 * dp), x = (w - rowW) / 2f, sum = 0;
                 bottom = by - 14 * dp;
                 for (float v : wt) sum += v;
@@ -198,26 +199,34 @@ public class FlipClockView extends View {
                     btnId[i] = ids[i];
                     x += bw + g;
                 }
-            } else {       // landscape: buttons in a column on the right, tiles get the full height
-                right = w - 170 * dp;
+            } else {                      // landscape: buttons in a column on the left or right
+                float colW = 170 * dp;
+                boolean leftSide = btnPos == 1;
+                if (leftSide) left = colW; else right = w - colW;
+                float bx0 = leftSide ? 12 * dp + inset * 0.5f : right + 8 * dp;
+                float bx1 = leftSide ? colW - 8 * dp : w - 12 * dp - inset * 0.5f;
                 float totalH = ids.length * bh + (ids.length - 1) * g;
                 float y = top + Math.max(0, (h - top - mg - totalH) / 2f);
                 for (int i = 0; i < ids.length; i++) {
-                    btn[i].set(right + 8 * dp, y, w - 12 * dp - inset * 0.5f, y + bh);
+                    btn[i].set(bx0, y, bx1, y + bh);
                     btnId[i] = ids[i];
                     y += bh + g;
                 }
             }
             nBtn = ids.length;
         }
-        float availW = right - left, availH = bottom - top, side, scale = mode == 0 ? sizeClock : sizeTimer;
+        float availW = right - left, availH = bottom - top, side, cap, scale = mode == 0 ? sizeClock : sizeTimer;
         if (!land) {
-            side = Math.max(10, Math.min(availW - 2 * mg, (availH - gap - 2 * mg) / 2f)) * scale;
+            side = Math.max(10, Math.min(availW - 2 * mg, (availH - gap - 2 * mg) / 2f));
+            cap = Math.min(w - mg, (h - gap - mg) / 2f);     // sizes above 100% may grow up to the screen edge
+            side = Math.min(side * scale, cap);
             float x = left + (availW - side) / 2f, y0 = top + (availH - 2 * side - gap) / 2f;
             hr.set(x, y0, x + side, y0 + side);
             mr.set(x, y0 + side + gap, x + side, y0 + 2 * side + gap);
         } else {
-            side = Math.max(10, Math.min((availW - gap - 2 * mg) / 2f, availH - 2 * mg)) * scale;
+            side = Math.max(10, Math.min((availW - gap - 2 * mg) / 2f, availH - 2 * mg));
+            cap = Math.min((w - gap - mg) / 2f, h - mg);
+            side = Math.min(side * scale, cap);
             float x0 = left + (availW - 2 * side - gap) / 2f, y0 = top + (availH - side) / 2f;
             hr.set(x0, y0, x0 + side, y0 + side);
             mr.set(x0 + side + gap, y0, x0 + 2 * side + gap, y0 + side);
@@ -270,7 +279,7 @@ public class FlipClockView extends View {
         boolean image = false;
         if (look == Prefs.A_LIGHT) c.drawColor(0xFFE6E6E6);
         else if (look == Prefs.A_CUSTOM) c.drawColor(ovBg != 0 ? ovBg : 0xFF1E2430);
-        else if (src != null && (look == Prefs.A_WALLHAVEN || look == Prefs.A_LOCAL)) { drawImage(c, w, h); image = true; }
+        else if (src != null && look >= Prefs.A_WALLHAVEN) { drawImage(c, w, h); image = true; }
         else c.drawColor(0xFF000000);
         bg = b;
 
@@ -655,7 +664,9 @@ public class FlipClockView extends View {
         int sel = Prefs.i(c, "tm_preset", 0);
         String[] items = {"25 / 5 minutes", "50 / 10 minutes", "90 / 20 minutes",
                 "Custom (" + Prefs.i(c, "tm_focus", 25) + " / " + Prefs.i(c, "tm_break", 5) + ")…"};
-        final PopupWindow pw = new PopupWindow(l, ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, true);
+        ScrollView sv = new ScrollView(c);   // scrolls if the screen is too short (landscape)
+        sv.addView(l);
+        final PopupWindow pw = new PopupWindow(sv, ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, true);
         for (int i = 0; i < items.length; i++) {
             TextView t = new TextView(c);
             t.setText(items[i]);
@@ -677,7 +688,14 @@ public class FlipClockView extends View {
         l.measure(MeasureSpec.UNSPECIFIED, MeasureSpec.UNSPECIFIED);
         int[] loc = new int[2];
         getLocationOnScreen(loc);
-        pw.showAtLocation(this, Gravity.NO_GRAVITY, loc[0] + (int) anchor.left, loc[1] + (int) anchor.top - l.getMeasuredHeight() - (int) (8 * dp));
+        int mh = l.getMeasuredHeight(), gp = (int) (8 * dp);
+        int above = loc[1] + (int) anchor.top - 2 * gp;
+        int below = loc[1] + getHeight() - (loc[1] + (int) anchor.bottom) - 2 * gp;
+        boolean up = above >= mh || above >= below;   // opens upward when there is room, otherwise downward
+        int ph = Math.max((int) (80 * dp), Math.min(mh, up ? above : below));
+        pw.setHeight(ph);
+        int y = up ? loc[1] + (int) anchor.top - ph - gp : loc[1] + (int) anchor.bottom + gp;
+        pw.showAtLocation(this, Gravity.NO_GRAVITY, loc[0] + (int) anchor.left, y);
     }
 
     private EditText num(Context c, String hint, int v) {
@@ -702,7 +720,7 @@ public class FlipClockView extends View {
         final EditText b = num(c, "Rest (minutes)", Prefs.i(c, "tm_break", 5));
         l.addView(f);
         l.addView(b);
-        new AlertDialog.Builder(c).setTitle("Custom focus / rest").setView(l)
+        new AlertDialog.Builder(c).setTitle("Custom focus / rest").setView(UI.scroll(c, l))
                 .setPositiveButton("Save", new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) {
                         Prefs.put(c, "tm_focus", Math.max(1, Math.min(240, parse(f, 25))));

@@ -6,28 +6,50 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.SeekBar;
+import android.widget.TextView;
 
-/** Small HSV colour wheel (hue around, saturation outwards) plus a brightness slider. No libraries. */
+/**
+ * HSV colour wheel + brightness slider + preview. In landscape the wheel sits beside the controls so
+ * everything is visible at once; the dialog around it also scrolls. Touches outside the wheel scroll the dialog.
+ */
 final class ColorPicker extends LinearLayout {
     private float hue = 210f, sat = 0.5f, val = 1f;
     private final View wheel, preview;
+    private final TextView hex;
 
     ColorPicker(Context c, int init) {
         super(c);
-        setOrientation(VERTICAL);
+        android.util.DisplayMetrics dm = c.getResources().getDisplayMetrics();
+        boolean land = dm.widthPixels > dm.heightPixels;
+        setOrientation(land ? HORIZONTAL : VERTICAL);
         if (init != 0) {
             float[] h = new float[3];
             Color.colorToHSV(init, h);
             hue = h[0]; sat = h[1]; val = h[2];
         }
+        int ws = land ? Math.min(UI.dp(c, 230), (int) (dm.heightPixels * 0.6f)) : Math.min(UI.dp(c, 270), (int) (dm.heightPixels * 0.42f));
         wheel = new Wheel(c);
-        addView(wheel, new LayoutParams(LayoutParams.MATCH_PARENT, Math.min(UI.dp(c, 260), (int) (c.getResources().getDisplayMetrics().heightPixels * 0.5f))));
+        addView(wheel, new LayoutParams(ws, ws));
+
+        LinearLayout side = new LinearLayout(c);
+        side.setOrientation(VERTICAL);
+        side.setPadding(land ? UI.dp(c, 16) : 0, UI.dp(c, 8), 0, 0);
+        TextView lab = new TextView(c);
+        lab.setText("Brightness");
+        side.addView(lab);
         SeekBar sb = new SeekBar(c);
         sb.setMax(100);
         sb.setProgress((int) (val * 100));
-        addView(sb);
+        side.addView(sb);
         preview = new View(c);
-        addView(preview, new LayoutParams(LayoutParams.MATCH_PARENT, UI.dp(c, 36)));
+        LayoutParams pl = new LayoutParams(LayoutParams.MATCH_PARENT, UI.dp(c, 40));
+        pl.topMargin = UI.dp(c, 12);
+        side.addView(preview, pl);
+        hex = new TextView(c);
+        hex.setPadding(0, UI.dp(c, 6), 0, 0);
+        side.addView(hex);
+        addView(side, land ? new LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f) : new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
+
         sb.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             public void onProgressChanged(SeekBar s, int p, boolean u) { val = p / 100f; refresh(); }
             public void onStartTrackingTouch(SeekBar s) { }
@@ -39,18 +61,21 @@ final class ColorPicker extends LinearLayout {
     int getColor() { return Color.HSVToColor(new float[]{hue, sat, val}); }
 
     private void refresh() {
-        preview.setBackgroundColor(getColor());
+        int col = getColor();
+        preview.setBackgroundColor(col);
+        hex.setText(String.format("#%06X", col & 0xFFFFFF));
         wheel.invalidate();
     }
 
     private final class Wheel extends View {
         private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
         private float cx, cy, r;
+        private boolean dragging;
 
         Wheel(Context c) { super(c); }
 
         @Override protected void onSizeChanged(int w, int h, int ow, int oh) {
-            cx = w / 2f; cy = h / 2f; r = Math.min(w, h) / 2f - 10 * getResources().getDisplayMetrics().density;
+            cx = w / 2f; cy = h / 2f; r = Math.min(w, h) / 2f - 12 * getResources().getDisplayMetrics().density;
         }
 
         @Override protected void onDraw(Canvas c) {
@@ -73,11 +98,17 @@ final class ColorPicker extends LinearLayout {
         }
 
         @Override public boolean onTouchEvent(MotionEvent e) {
+            float dx = e.getX() - cx, dy = e.getY() - cy, dist = (float) Math.sqrt(dx * dx + dy * dy);
+            if (e.getAction() == MotionEvent.ACTION_DOWN) {
+                dragging = dist <= r + 8 * getResources().getDisplayMetrics().density;
+                if (!dragging) return false;   // outside the circle: let the dialog scroll
+            }
+            if (!dragging) return false;
             if (getParent() != null) getParent().requestDisallowInterceptTouchEvent(true);
-            float dx = e.getX() - cx, dy = e.getY() - cy;
-            sat = Math.min(1f, (float) Math.sqrt(dx * dx + dy * dy) / r);
+            sat = Math.min(1f, dist / r);
             hue = (float) ((Math.toDegrees(Math.atan2(dy, dx)) + 360) % 360);
             refresh();
+            if (e.getAction() == MotionEvent.ACTION_UP || e.getAction() == MotionEvent.ACTION_CANCEL) dragging = false;
             return true;
         }
     }
